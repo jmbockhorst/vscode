@@ -1173,34 +1173,52 @@ export class Repository {
 
 		try {
 			await this.run(args);
-		} catch (commitErr) {
-			await this.handleCommitError(commitErr);
+		} catch (err) {
+			if (/You must edit all merge conflicts/.test(err.stdout || '')) {
+				err.gitErrorCode = GitErrorCodes.Conflict;
+			} else if (/If there is nothing left to stage/.test(err.stdout || '')) {
+				err.gitErrorCode = GitErrorCodes.NoLocalChanges;
+			}
+
+			throw err;
 		}
+
 	}
 
 	async rebaseAbort(): Promise<void> {
 		const args = ['rebase', '--abort'];
-
-		try {
-			await this.run(args);
-		} catch (commitErr) {
-			await this.handleCommitError(commitErr);
-		}
+		await this.run(args);
 	}
 
 	async rebaseSkip(): Promise<void> {
 		const args = ['rebase', '--skip'];
-
 		try {
 			await this.run(args);
-		} catch (commitErr) {
-			await this.handleCommitError(commitErr);
+		} catch (err) {
+			throw err;
 		}
 	}
 
-	async rebase(commitHash: string): Promise<void> {
+	async rebaseInteractive(commitHash: string): Promise<void> {
+		const env = { ELECTRON_RUN_AS_NODE: undefined };
 		const args = ['rebase', '-i', commitHash];
-		await this.run(args);
+		await this.run(args, { env });
+	}
+
+	async rebaseBranch(branch: string): Promise<void> {
+		const args = ['rebase', branch];
+		try {
+			const result = await this.run(args);
+			if (/is up to date/.test(result.stdout || '')) {
+				throw GitErrorCodes.AlreadyUpToDate;
+			}
+		} catch (err) {
+			if (/Failed to merge in the changes/.test(err.stderr || '')) {
+				throw GitErrorCodes.Conflict;
+			}
+
+			throw err;
+		}
 	}
 
 	private async handleCommitError(commitErr: any): Promise<void> {

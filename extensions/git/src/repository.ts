@@ -1012,7 +1012,15 @@ export class Repository implements Disposable {
 	}
 
 	async rebaseContinue() {
-		await this.run(Operation.Rebase, () => this.repository.rebaseContinue());
+		try {
+			await this.run(Operation.Rebase, () => this.repository.rebaseContinue());
+		} catch (err) {
+			if (err.gitErrorCode === GitErrorCodes.Conflict) {
+				window.showErrorMessage('You must edit all merge conflicts and then stage the changes');
+			} else if (err.gitErrorCode === GitErrorCodes.NoLocalChanges) {
+				window.showInformationMessage('If there is nothing left to stage, you might need to skip this patch');
+			}
+		}
 	}
 
 	async rebaseAbort() {
@@ -1023,8 +1031,20 @@ export class Repository implements Disposable {
 		await this.run(Operation.Rebase, () => this.repository.rebaseSkip());
 	}
 
-	async rebase(commitHash: string) {
-		await this.run(Operation.Rebase, () => this.repository.rebase(commitHash));
+	async rebaseInteractive(commitHash: string) {
+		await this.run(Operation.Rebase, () => this.repository.rebaseInteractive(commitHash));
+	}
+
+	async rebaseBranch(branch: string) {
+		try {
+			await this.run(Operation.Rebase, () => this.repository.rebaseBranch(branch));
+		} catch (err) {
+			if (err === GitErrorCodes.AlreadyUpToDate) {
+				window.showInformationMessage('Branch is already up to date with ' + branch);
+			} else if (err === GitErrorCodes.Conflict) {
+				window.showInformationMessage('Resolve all conflicts manually and then run Rebase: Continue');
+			}
+		}
 	}
 
 	async blame(path: string): Promise<string> {

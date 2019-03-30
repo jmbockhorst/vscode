@@ -137,6 +137,34 @@ class CommitItem implements QuickPickItem {
 	get getCommit(): Commit { return this.commit; }
 }
 
+class RebaseBranch implements QuickPickItem {
+
+	constructor(private cc: CommandCenter) { }
+
+	get label(): string { return localize('rebase', 'Rebase from another branch'); }
+	get description(): string { return ''; }
+
+	get alwaysShow(): boolean { return true; }
+
+	async run(repository: Repository): Promise<void> {
+		await this.cc.rebaseBranch(repository);
+	}
+}
+
+class RebaseBackToCommit implements QuickPickItem {
+
+	constructor(private cc: CommandCenter) { }
+
+	get label(): string { return localize('rebase commit', 'Consolidate commits'); }
+	get description(): string { return ''; }
+
+	get alwaysShow(): boolean { return true; }
+
+	async run(repository: Repository): Promise<void> {
+		await this.cc.rebaseSquash(repository);
+	}
+}
+
 interface CommandOptions {
 	repository?: boolean;
 	diff?: boolean;
@@ -1844,12 +1872,8 @@ export class CommandCenter {
 
 	@command('git.rebase', { repository: true })
 	async rebase(repository: Repository): Promise<void> {
-		if (!workspace.workspaceFolders) {
-			return;
-		}
-
-		const rebaseDir = workspace.workspaceFolders[0].uri.fsPath + '/.git/rebase-merge';
-		const rebaseInProgress = existsSync(rebaseDir);
+		const rebaseInProgress = existsSync(repository.root + '/.git/rebase-merge') ||
+			existsSync(repository.root + '/.git/rebase-apply');
 
 		if (rebaseInProgress) {
 			const placeHolder = localize('rebase is in progress', 'A rebase is currently in progress');
@@ -1857,20 +1881,63 @@ export class CommandCenter {
 			const result = await window.showQuickPick(['Continue', 'Abort', 'Skip'], { placeHolder });
 
 			if (result === 'Continue') {
-				repository.rebaseContinue();
+				await repository.rebaseContinue();
 			} else if (result === 'Abort') {
-				repository.rebaseAbort();
+				await repository.rebaseAbort();
 			} else if (result === 'Skip') {
-				repository.rebaseSkip();
+				await repository.rebaseSkip();
+			}
+
+			const rebaseStillInProgress = existsSync(repository.root + '/.git/rebase-merge') ||
+				existsSync(repository.root + '/.git/rebase-apply');
+
+			if (!rebaseStillInProgress) {
+				if (result === 'Abort') {
+					window.showInformationMessage('Rebase aborted');
+				} else {
+					window.showInformationMessage('Rebase completed successfully');
+				}
+
 			}
 
 			return;
 		}
 
+		const rebaseBranch = new RebaseBranch(this);
+		const rebaseBack = new RebaseBackToCommit(this);
+
+		const placeHolder = localize('rebase action', 'Choose what rebase action you want to do');
+		const result = await window.showQuickPick([rebaseBranch, rebaseBack], { placeHolder });
+
+		if (result === rebaseBranch) {
+			await this.rebaseBranch(repository);
+		} else if (result === rebaseBack) {
+			await this.rebaseSquash(repository);
+		}
+
+		return;
+	}
+
+	@command('git.rebaseBranch', { repository: true })
+	async rebaseBranch(repository: Repository): Promise<void> {
+		const branches = repository.refs.filter(ref => ref.name && ref.type === RefType.Head).map(r => r.name!);
+		const remoteBranches = repository.refs.filter(ref => ref.name && ref.type === RefType.RemoteHead).map(r => r.name!);
+		const branchPlaceHolder = localize('select a branch to rebase', 'Select a branch to rebase from');
+		const branchToRebase = await window.showQuickPick([...branches, ...remoteBranches], { placeHolder: branchPlaceHolder });
+
+		if (!branchToRebase) {
+			return;
+		}
+
+		await repository.rebaseBranch(branchToRebase);
+
+		return;
+	}
+
+	@command('git.rebaseSquash', { repository: true })
+	async rebaseSquash(repository: Repository): Promise<void> {
 		let commit = await repository.getCommit('HEAD');
-
 		const numCommitsToShow = 10;
-
 		const pickItems: CommitItem[] = [];
 
 		for (let i = 0; i < numCommitsToShow; i++) {
@@ -1883,8 +1950,7 @@ export class CommandCenter {
 			commit = await repository.getCommit(commit.parents[0]);
 		}
 
-		const placeHolder = localize('select a commit to rebase', 'Select a commit to rebase up to');
-
+		const placeHolder = localize('select a commit to rebase', 'Select a commit to rebase back to');
 		const commitToRebase = await window.showQuickPick(pickItems, { placeHolder });
 
 		if (!commitToRebase) {
@@ -1895,7 +1961,9 @@ export class CommandCenter {
 			return;
 		}
 
-		await repository.rebase(commitToRebase.getCommit.parents[0]);
+		await repository.rebaseInteractive(commitToRebase.getCommit.parents[0]);
+
+		window.showInformationMessage('Rebase successful');
 
 		return;
 	}
