@@ -311,7 +311,7 @@ function getGitErrorCode(stderr: string): string | undefined {
 	return undefined;
 }
 
-const COMMIT_FORMAT = '%H\n%ae\n%P\n%B';
+const COMMIT_FORMAT = '%H\n%ae\n%an\n%P\n%B';
 
 export class Git {
 
@@ -452,6 +452,7 @@ export interface Commit {
 	hash: string;
 	message: string;
 	parents: string[];
+	authorName?: string | undefined;
 	authorEmail?: string | undefined;
 }
 
@@ -584,13 +585,13 @@ export function parseGitmodules(raw: string): Submodule[] {
 }
 
 export function parseGitCommit(raw: string): Commit | null {
-	const match = /^([0-9a-f]{40})\n(.*)\n(.*)\n([^]*)$/m.exec(raw.trim());
+	const match = /^([0-9a-f]{40})\n(.*)\n(.*)\n(.*)\n([^]*)$/m.exec(raw.trim());
 	if (!match) {
 		return null;
 	}
 
-	const parents = match[3] ? match[3].split(' ') : [];
-	return { hash: match[1], message: match[4], parents, authorEmail: match[2] };
+	const parents = match[4] ? match[4].split(' ') : [];
+	return { hash: match[1], message: match[5], parents, authorName: match[3], authorEmail: match[2] };
 }
 
 interface LsTreeElement {
@@ -1175,6 +1176,31 @@ export class Repository {
 		} catch (commitErr) {
 			await this.handleCommitError(commitErr);
 		}
+	}
+
+	async rebaseAbort(): Promise<void> {
+		const args = ['rebase', '--abort'];
+
+		try {
+			await this.run(args);
+		} catch (commitErr) {
+			await this.handleCommitError(commitErr);
+		}
+	}
+
+	async rebaseSkip(): Promise<void> {
+		const args = ['rebase', '--skip'];
+
+		try {
+			await this.run(args);
+		} catch (commitErr) {
+			await this.handleCommitError(commitErr);
+		}
+	}
+
+	async rebase(commitHash: string): Promise<void> {
+		const args = ['rebase', '-i', commitHash];
+		await this.run(args);
 	}
 
 	private async handleCommitError(commitErr: any): Promise<void> {

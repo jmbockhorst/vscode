@@ -4,14 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Uri, commands, Disposable, window, workspace, QuickPickItem, OutputChannel, Range, WorkspaceEdit, Position, LineChange, SourceControlResourceState, TextDocumentShowOptions, ViewColumn, ProgressLocation, TextEditor, MessageOptions, WorkspaceFolder } from 'vscode';
-import { Git, CommitOptions, Stash, ForcePushMode } from './git';
+import { Git, CommitOptions, Stash, ForcePushMode, Commit } from './git';
 import { Repository, Resource, ResourceGroupType } from './repository';
 import { Model } from './model';
 import { toGitUri, fromGitUri } from './uri';
 import { grep, isDescendant, pathEquals } from './util';
 import { applyLineChanges, intersectDiffWithRange, toLineRanges, invertLineChange, getModifiedRange } from './staging';
 import * as path from 'path';
-import { lstat, Stats } from 'fs';
+import { lstat, Stats, existsSync } from 'fs';
 import * as os from 'os';
 import TelemetryReporter from 'vscode-extension-telemetry';
 import * as nls from 'vscode-nls';
@@ -124,6 +124,17 @@ class HEADItem implements QuickPickItem {
 	get label(): string { return 'HEAD'; }
 	get description(): string { return (this.repository.HEAD && this.repository.HEAD.commit || '').substr(0, 8); }
 	get alwaysShow(): boolean { return true; }
+}
+
+class CommitItem implements QuickPickItem {
+
+	constructor(private commit: Commit) { }
+
+	get label(): string { return this.commit.hash.substr(0, 6) + '\t' + this.commit.message; }
+	get description(): string { return this.commit.authorName!; }
+	get alwaysShow(): boolean { return true; }
+
+	get getCommit(): Commit { return this.commit; }
 }
 
 interface CommandOptions {
@@ -1829,6 +1840,64 @@ export class CommandCenter {
 	@command('git.pushToForce', { repository: true })
 	async pushToForce(repository: Repository): Promise<void> {
 		await this._push(repository, { pushType: PushType.PushTo, forcePush: true });
+	}
+
+	@command('git.rebase', { repository: true })
+	async rebase(repository: Repository): Promise<void> {
+		if (!workspace.workspaceFolders) {
+			return;
+		}
+
+		const rebaseDir = workspace.workspaceFolders[0].uri.fsPath + '/.git/rebase-merge';
+		const rebaseInProgress = existsSync(rebaseDir);
+
+		if (rebaseInProgress) {
+			const placeHolder = localize('rebase is in progress', 'A rebase is currently in progress');
+
+			const result = await window.showQuickPick(['Continue', 'Abort', 'Skip'], { placeHolder });
+
+			if (result === 'Continue') {
+				repository.rebaseContinue();
+			} else if (result === 'Abort') {
+				repository.rebaseAbort();
+			} else if (result === 'Skip') {
+				repository.rebaseSkip();
+			}
+
+			return;
+		}
+
+		let commit = await repository.getCommit('HEAD');
+
+		const numCommitsToShow = 10;
+
+		const pickItems: CommitItem[] = [];
+
+		for (let i = 0; i < numCommitsToShow; i++) {
+			pickItems.push(new CommitItem(commit));
+
+			if (commit.parents.length === 0) {
+				break;
+			}
+
+			commit = await repository.getCommit(commit.parents[0]);
+		}
+
+		const placeHolder = localize('select a commit to rebase', 'Select a commit to rebase up to');
+
+		const commitToRebase = await window.showQuickPick(pickItems, { placeHolder });
+
+		if (!commitToRebase) {
+			return;
+		}
+
+		if (commitToRebase.getCommit.parents.length === 0) {
+			return;
+		}
+
+		await repository.rebase(commitToRebase.getCommit.parents[0]);
+
+		return;
 	}
 
 	@command('git.addRemote', { repository: true })

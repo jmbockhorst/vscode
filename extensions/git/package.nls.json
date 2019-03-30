@@ -47,6 +47,7 @@
 	"command.pushForce": "Push (Force)",
 	"command.pushTo": "Push to...",
 	"command.pushToForce": "Push to... (Force)",
+	"command.rebase": "Rebase",
 	"command.pushWithTags": "Push With Tags",
 	"command.pushWithTagsForce": "Push With Tags (Force)",
 	"command.addRemote": "Add Remote",

@@ -316,6 +316,11 @@
         "category": "Git"
       },
       {
+        "command": "git.rebase",
+        "title": "%command.rebase%",
+        "category": "Git"
+      },
+      {
         "command": "git.pushWithTags",
         "title": "%command.pushWithTags%",
         "category": "Git"
@@ -582,6 +587,10 @@
           "when": "config.git.enabled && config.git.allowForcePush && gitOpenRepositoryCount != 0"
         },
         {
+          "command": "git.rebase",
+          "when": "config.git.enabled && gitOpenRepositoryCount != 0"
+        },
+        {
           "command": "git.pushWithTags",
           "when": "config.git.enabled && gitOpenRepositoryCount != 0"
         },
@@ -711,6 +720,11 @@
         {
           "command": "git.publish",
           "group": "2_branch",
+          "when": "scmProvider == git"
+        },
+        {
+          "command": "git.rebase",
+          "group": "3_rebase",
           "when": "scmProvider == git"
         },
         {

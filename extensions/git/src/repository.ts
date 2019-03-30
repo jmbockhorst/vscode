@@ -285,6 +285,7 @@ export const enum Operation {
 	Pull = 'Pull',
 	Push = 'Push',
 	Sync = 'Sync',
+	Rebase = 'Rebase',
 	Show = 'Show',
 	Stage = 'Stage',
 	GetCommitTemplate = 'GetCommitTemplate',
@@ -1008,6 +1009,22 @@ export class Repository implements Disposable {
 
 	async pushTags(remote?: string, forcePushMode?: ForcePushMode): Promise<void> {
 		await this.run(Operation.Push, () => this.repository.push(remote, undefined, false, true, forcePushMode));
+	}
+
+	async rebaseContinue() {
+		await this.run(Operation.Rebase, () => this.repository.rebaseContinue());
+	}
+
+	async rebaseAbort() {
+		await this.run(Operation.Rebase, () => this.repository.rebaseAbort());
+	}
+
+	async rebaseSkip() {
+		await this.run(Operation.Rebase, () => this.repository.rebaseSkip());
+	}
+
+	async rebase(commitHash: string) {
+		await this.run(Operation.Rebase, () => this.repository.rebase(commitHash));
 	}
 
 	async blame(path: string): Promise<string> {
