@@ -514,7 +514,10 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 	}
 
 	expandAll(): void {
-		this.tree.expandAll();
+		// Must refresh the entire tree to expand it
+		this.refreshAndRenderNode(this.root, true, ChildrenResolutionReason.Refresh, undefined, true).then(() => {
+			this.tree.expandAll();
+		});
 	}
 
 	collapseAll(): void {
@@ -619,8 +622,8 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 		return node;
 	}
 
-	private async refreshAndRenderNode(node: IAsyncDataTreeNode<TInput, T>, recursive: boolean, reason: ChildrenResolutionReason, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>): Promise<void> {
-		await this.refreshNode(node, recursive, viewStateContext);
+	private async refreshAndRenderNode(node: IAsyncDataTreeNode<TInput, T>, recursive: boolean, reason: ChildrenResolutionReason, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>, updateEntireTree?: boolean): Promise<void> {
+		await this.refreshNode(node, recursive, viewStateContext, updateEntireTree);
 		this.render(node, viewStateContext);
 
 		if (node !== this.root && this.autoExpandSingleChildren && reason === ChildrenResolutionReason.Expand) {
@@ -633,12 +636,12 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 		}
 	}
 
-	private async refreshNode(node: IAsyncDataTreeNode<TInput, T>, recursive: boolean, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>): Promise<void> {
+	private async refreshNode(node: IAsyncDataTreeNode<TInput, T>, recursive: boolean, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>, updateEntireTree?: boolean): Promise<void> {
 		let result: Promise<void> | undefined;
 
 		this.subTreeRefreshPromises.forEach((refreshPromise, refreshNode) => {
 			if (!result && intersects(refreshNode, node)) {
-				result = refreshPromise.then(() => this.refreshNode(node, recursive, viewStateContext));
+				result = refreshPromise.then(() => this.refreshNode(node, recursive, viewStateContext, updateEntireTree));
 			}
 		});
 
@@ -646,7 +649,7 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 			return result;
 		}
 
-		result = this.doRefreshSubTree(node, recursive, viewStateContext);
+		result = this.doRefreshSubTree(node, recursive, viewStateContext, updateEntireTree);
 		this.subTreeRefreshPromises.set(node, result);
 
 		try {
@@ -656,20 +659,20 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 		}
 	}
 
-	private async doRefreshSubTree(node: IAsyncDataTreeNode<TInput, T>, recursive: boolean, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>): Promise<void> {
+	private async doRefreshSubTree(node: IAsyncDataTreeNode<TInput, T>, recursive: boolean, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>, updateEntireTree?: boolean): Promise<void> {
 		node.loading = true;
 
 		try {
-			const childrenToRefresh = await this.doRefreshNode(node, recursive, viewStateContext);
+			const childrenToRefresh = await this.doRefreshNode(node, recursive, viewStateContext, updateEntireTree);
 			node.stale = false;
 
-			await Promise.all(childrenToRefresh.map(child => this.doRefreshSubTree(child, recursive, viewStateContext)));
+			await Promise.all(childrenToRefresh.map(child => this.doRefreshSubTree(child, recursive, viewStateContext, updateEntireTree)));
 		} finally {
 			node.loading = false;
 		}
 	}
 
-	private async doRefreshNode(node: IAsyncDataTreeNode<TInput, T>, recursive: boolean, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>): Promise<IAsyncDataTreeNode<TInput, T>[]> {
+	private async doRefreshNode(node: IAsyncDataTreeNode<TInput, T>, recursive: boolean, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>, updateEntireTree?: boolean): Promise<IAsyncDataTreeNode<TInput, T>[]> {
 		node.hasChildren = !!this.dataSource.hasChildren(node.element!);
 
 		let childrenPromise: Promise<T[]>;
@@ -690,7 +693,7 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 
 		try {
 			const children = await childrenPromise;
-			return this.setChildren(node, children, recursive, viewStateContext);
+			return this.setChildren(node, children, recursive, viewStateContext, updateEntireTree);
 		} catch (err) {
 			if (node !== this.root) {
 				this.tree.collapse(node === this.root ? null : node);
@@ -742,7 +745,7 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 		}
 	}
 
-	private setChildren(node: IAsyncDataTreeNode<TInput, T>, childrenElements: T[], recursive: boolean, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>): IAsyncDataTreeNode<TInput, T>[] {
+	private setChildren(node: IAsyncDataTreeNode<TInput, T>, childrenElements: T[], recursive: boolean, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>, updateEntireTree?: boolean): IAsyncDataTreeNode<TInput, T>[] {
 		// perf: if the node was and still is a leaf, avoid all this hassle
 		if (node.children.length === 0 && childrenElements.length === 0) {
 			return [];
@@ -826,7 +829,11 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 
 		node.children.splice(0, node.children.length, ...children);
 
-		return childrenToRefresh;
+		if (updateEntireTree) {
+			return children;
+		} else {
+			return childrenToRefresh;
+		}
 	}
 
 	private render(node: IAsyncDataTreeNode<TInput, T>, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>): void {

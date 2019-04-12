@@ -38,7 +38,7 @@ import { renderOcticons } from 'vs/base/browser/ui/octiconLabel/octiconLabel';
 import { format } from 'vs/base/common/strings';
 import { ISpliceable, ISequence, ISplice } from 'vs/base/common/sequence';
 import { firstIndex, equals } from 'vs/base/common/arrays';
-import { WorkbenchList } from 'vs/platform/list/browser/listService';
+import { WorkbenchList, WorkbenchAsyncDataTree } from 'vs/platform/list/browser/listService';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { ThrottledDelayer } from 'vs/base/common/async';
 import { INotificationService } from 'vs/platform/notification/common/notification';
@@ -49,6 +49,13 @@ import { IExtensionService } from 'vs/workbench/services/extensions/common/exten
 import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
 import { IViewsRegistry, IViewDescriptor, Extensions } from 'vs/workbench/common/views';
 import { Registry } from 'vs/platform/registry/common/platform';
+import { IFileTemplateData } from 'vs/workbench/contrib/files/browser/views/explorerViewer';
+import { ExplorerItem } from 'vs/workbench/contrib/files/common/explorerModel';
+import { IAsyncDataSource, ITreeRenderer, ITreeNode } from 'vs/base/browser/ui/tree/tree';
+import { URI } from 'vs/base/common/uri';
+import { FuzzyScore } from 'vs/base/common/filters';
+import { IExplorerService, IFilesConfiguration } from 'vs/workbench/contrib/files/common/files';
+import { FileKind } from 'vs/platform/files/common/files';
 
 export interface ISpliceEvent<T> {
 	index: number;
@@ -518,6 +525,143 @@ class ResourceRenderer implements IListRenderer<ISCMResource, ResourceTemplate> 
 	}
 }
 
+class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, [], ResourceTemplate> {
+
+	static TEMPLATE_ID = 'resourceTree';
+	get templateId(): string { return ResourceTreeRenderer.TEMPLATE_ID; }
+
+	constructor(
+		private labels: ResourceLabels,
+		private actionItemProvider: IActionItemProvider,
+		private getSelectedResources: () => ISCMResource[],
+		private themeService: IThemeService,
+		private menus: SCMMenus
+	) { }
+
+	renderTemplate(container: HTMLElement): ResourceTemplate {
+		const element = append(container, $('.resource'));
+		const name = append(element, $('.name'));
+		const fileLabel = this.labels.create(name);
+		const actionsContainer = append(fileLabel.element, $('.actions'));
+		const actionBar = new ActionBar(actionsContainer, {
+			actionItemProvider: this.actionItemProvider,
+			actionRunner: new MultipleSelectionActionRunner(this.getSelectedResources)
+		});
+
+		const decorationIcon = append(element, $('.decoration-icon'));
+
+		return {
+			element, name, fileLabel, decorationIcon, actionBar, elementDisposable: Disposable.None, dispose: () => {
+				actionBar.dispose();
+				fileLabel.dispose();
+			}
+		};
+	}
+
+	renderElement(resource: ITreeNode<ISCMResource, []>, index: number, template: ResourceTemplate): void {
+		template.elementDisposable.dispose();
+
+		const theme = this.themeService.getTheme();
+		const icon = theme.type === LIGHT ? resource.element.decorations.icon : resource.element.decorations.iconDark;
+
+		template.fileLabel.setFile(resource.element.sourceUri, { fileDecorations: { colors: false, badges: !icon, data: resource.element.decorations } });
+		template.actionBar.context = resource;
+
+		const disposables: IDisposable[] = [];
+		disposables.push(connectPrimaryMenuToInlineActionBar(this.menus.getResourceMenu(resource.element.resourceGroup), template.actionBar));
+
+		toggleClass(template.name, 'strike-through', resource.element.decorations.strikeThrough);
+		toggleClass(template.element, 'faded', resource.element.decorations.faded);
+
+		if (icon) {
+			template.decorationIcon.style.display = '';
+			template.decorationIcon.style.backgroundImage = `url('${icon}')`;
+			template.decorationIcon.title = resource.element.decorations.tooltip || '';
+		} else {
+			template.decorationIcon.style.display = 'none';
+			template.decorationIcon.style.backgroundImage = '';
+		}
+
+		template.element.setAttribute('data-tooltip', resource.element.decorations.tooltip || '');
+		template.elementDisposable = combinedDisposable(disposables);
+	}
+
+	disposeElement(resource: ITreeNode<ISCMResource, []>, index: number, template: ResourceTemplate): void {
+		template.elementDisposable.dispose();
+	}
+
+	disposeTemplate(template: ResourceTemplate): void {
+		template.elementDisposable.dispose();
+		template.dispose();
+	}
+}
+
+class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, IFileTemplateData>, IDisposable {
+	static readonly ID = 'scmFile';
+
+	private config: IFilesConfiguration;
+	private configListener: IDisposable;
+
+	constructor(
+		private labels: ResourceLabels,
+		private updateWidth: (stat: ExplorerItem) => void,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IExplorerService private readonly explorerService: IExplorerService
+	) {
+		this.config = this.configurationService.getValue<IFilesConfiguration>();
+		this.configListener = this.configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('explorer')) {
+				this.config = this.configurationService.getValue();
+			}
+		});
+	}
+
+	get templateId(): string {
+		return SCMFilesRenderer.ID;
+	}
+
+	renderTemplate(container: HTMLElement): IFileTemplateData {
+		const elementDisposable = Disposable.None;
+		const label = this.labels.create(container, { supportHighlights: true });
+
+		return { elementDisposable, label, container };
+	}
+
+	renderElement(node: ITreeNode<ExplorerItem, FuzzyScore>, index: number, templateData: IFileTemplateData): void {
+		templateData.elementDisposable.dispose();
+		const stat = node.element;
+		const editableData = this.explorerService.getEditableData(stat);
+
+		// File Label
+		if (!editableData) {
+			templateData.label.element.style.display = 'flex';
+			const extraClasses = ['explorer-item'];
+			templateData.label.setResource({ resource: stat.resource, name: stat.name }, {
+				extraClasses,
+				fileDecorations: this.config.explorer.decorations,
+				fileKind: FileKind.FOLDER
+			});
+
+			templateData.elementDisposable = templateData.label.onDidRender(() => {
+				this.updateWidth(stat);
+			});
+		}
+	}
+
+	disposeElement?(element: ITreeNode<ExplorerItem, FuzzyScore>, index: number, templateData: IFileTemplateData): void {
+		templateData.elementDisposable.dispose();
+	}
+
+	disposeTemplate(templateData: IFileTemplateData): void {
+		templateData.elementDisposable.dispose();
+		templateData.label.dispose();
+	}
+
+	dispose(): void {
+		this.configListener.dispose();
+	}
+}
+
 class ProviderListDelegate implements IListVirtualDelegate<ISCMResourceGroup | ISCMResource> {
 
 	getHeight() { return 22; }
@@ -695,17 +839,83 @@ function convertValidationType(type: InputValidationType): MessageType {
 	}
 }
 
+class SCMItem extends ExplorerItem {
+	public scmChildren: (SCMItem | ISCMResource)[] = [];
+	constructor(public resource: URI) {
+		super(resource, undefined, true, false, false);
+	}
+
+	public addSCMChild(newChild: SCMItem | ISCMResource) {
+		this.scmChildren.push(newChild);
+	}
+
+	public hasChild(childUri: URI): SCMItem | undefined {
+		if (this.resource.fsPath === childUri.fsPath) {
+			return this;
+		}
+
+		for (const child of this.scmChildren) {
+			if (child instanceof SCMItem) {
+				if (child.hasChild(childUri)) {
+					return child.hasChild(childUri);
+				}
+			}
+		}
+
+		return undefined;
+	}
+
+	get isRoot(): boolean {
+		return false;
+	}
+}
+
+class SCMDataSource implements IAsyncDataSource<SCMItem | ISCMResource, SCMItem | ISCMResource> {
+	constructor() { }
+
+	hasChildren(element: SCMItem | ISCMResource): boolean {
+		return element instanceof SCMItem && element.scmChildren.length > 0;
+	}
+
+	getChildren(element: SCMItem | ISCMResource): Promise<(SCMItem | ISCMResource)[]> {
+		if (element instanceof SCMItem) {
+			return Promise.resolve(element.scmChildren);
+		} else {
+			return Promise.reject('No children');
+		}
+	}
+}
+
+class SCMDelagate implements IListVirtualDelegate<SCMItem | ISCMResource> {
+
+	private static readonly ITEM_HEIGHT = 22;
+
+	getHeight(element: SCMItem | ISCMResource): number {
+		return SCMDelagate.ITEM_HEIGHT;
+	}
+
+	getTemplateId(element: SCMItem | ISCMResource): string {
+		if (element instanceof SCMItem) {
+			return SCMFilesRenderer.ID;
+		} else {
+			return ResourceTreeRenderer.TEMPLATE_ID;
+		}
+	}
+}
+
 export class RepositoryPanel extends ViewletPanel {
 
 	private cachedHeight: number | undefined = undefined;
 	private cachedWidth: number | undefined = undefined;
 	private inputBoxContainer: HTMLElement;
 	private inputBox: InputBox;
-	private listContainer: HTMLElement;
+	private changesContainer: HTMLElement;
 	private list: List<ISCMResourceGroup | ISCMResource>;
+	private tree: WorkbenchAsyncDataTree<SCMItem | ISCMResource, SCMItem | ISCMResource>;
 	private listLabels: ResourceLabels;
 	private menus: SCMMenus;
 	private visibilityDisposables: IDisposable[] = [];
+	private showChangesAsTree: boolean;
 	protected contextKeyService: IContextKeyService;
 
 	constructor(
@@ -732,6 +942,8 @@ export class RepositoryPanel extends ViewletPanel {
 
 		this.contextKeyService = contextKeyService.createScoped(this.element);
 		this.contextKeyService.createKey('scmRepository', this.repository);
+
+		this.showChangesAsTree = this.configurationService.getValue<boolean>('scm.showChangesAsTree');
 	}
 
 	render(): void {
@@ -819,9 +1031,9 @@ export class RepositoryPanel extends ViewletPanel {
 		this.updateInputBoxVisibility();
 
 		// List
-		this.listContainer = append(container, $('.scm-status.show-file-icons'));
+		this.changesContainer = append(container, $('.scm-status.show-file-icons'));
 
-		const updateActionsVisibility = () => toggleClass(this.listContainer, 'show-actions', this.configurationService.getValue<boolean>('scm.alwaysShowActions'));
+		const updateActionsVisibility = () => toggleClass(this.changesContainer, 'show-actions', this.configurationService.getValue<boolean>('scm.alwaysShowActions'));
 		Event.filter(this.configurationService.onDidChangeConfiguration, e => e.affectsConfiguration('scm.alwaysShowActions'))(updateActionsVisibility);
 		updateActionsVisibility();
 
@@ -837,7 +1049,8 @@ export class RepositoryPanel extends ViewletPanel {
 			new ResourceRenderer(this.listLabels, actionViewItemProvider, () => this.getSelectedResources(), this.themeService, this.menus)
 		];
 
-		this.list = this.instantiationService.createInstance(WorkbenchList, this.listContainer, delegate, renderers, {
+		// Show the changes as a list
+		this.list = this.instantiationService.createInstance(WorkbenchList, this.changesContainer, delegate, renderers, {
 			identityProvider: scmResourceIdentityProvider,
 			keyboardNavigationLabelProvider: scmKeyboardNavigationLabelProvider,
 			horizontalScrolling: false
@@ -856,9 +1069,129 @@ export class RepositoryPanel extends ViewletPanel {
 		this.list.onContextMenu(this.onListContextMenu, this, this.disposables);
 		this.disposables.push(this.list);
 
+		// Show the changes as a tree
+		const explorerLabels = this.instantiationService.createInstance(ResourceLabels, { onDidChangeVisibility: this.onDidChangeBodyVisibility });
+		const updateWidth = (stat: ExplorerItem) => { };
+		const filesRenderer = this.instantiationService.createInstance(SCMFilesRenderer, explorerLabels, updateWidth);
+		const resourceTreeRenderer = this.instantiationService.createInstance(ResourceTreeRenderer, this.listLabels, actionItemProvider, () => this.getSelectedResources(), this.themeService, this.menus);
+
+		this.tree = this.instantiationService.createInstance(WorkbenchAsyncDataTree, this.changesContainer, new SCMDelagate(), [filesRenderer, resourceTreeRenderer],
+			this.instantiationService.createInstance(SCMDataSource), {
+				identityProvider: {
+					getId: (stat: SCMItem | ISCMResource) => {
+						if (stat instanceof SCMItem) {
+							return stat.resource;
+						} else {
+							return stat.sourceUri;
+						}
+					}
+				},
+				autoExpandSingleChildren: true
+			}) as WorkbenchAsyncDataTree<SCMItem | ISCMResource, SCMItem | ISCMResource>;
+
+
+		this.buildTree();
+		this.repository.provider.onDidChangeResources(() => this.buildTree());
+		this.disposables.push(this.tree);
+
+		this.updateChanges();
+
+		const updateChangesView = () => {
+			this.showChangesAsTree = this.configurationService.getValue<boolean>('scm.showChangesAsTree');
+			this.updateChanges();
+		};
+		Event.filter(this.configurationService.onDidChangeConfiguration, e => e.affectsConfiguration('scm.showChangesAsTree'))(updateChangesView);
+
 		this.viewModel.onDidChangeVisibility(this.onDidChangeVisibility, this, this.disposables);
 		this.onDidChangeVisibility(this.viewModel.isVisible());
 		this.onDidChangeBodyVisibility(visible => this.inputBox.setEnabled(visible));
+	}
+
+	private updateChanges(): void {
+		const oldNode = this.changesContainer.childNodes[0];
+		if (this.showChangesAsTree) {
+			this.changesContainer.replaceChild(this.tree.getHTMLElement(), oldNode);
+		} else {
+			this.changesContainer.replaceChild(this.list.getHTMLElement(), oldNode);
+		}
+	}
+
+	private getParentUri(source: URI): URI {
+		const idx = source.fsPath.lastIndexOf('\\');
+		return URI.file(source.fsPath.substr(0, idx));
+	}
+
+	private buildTree(): void {
+		const rootUri = this.repository.provider.rootUri;
+		if (!rootUri) {
+			return;
+		}
+
+		let root: SCMItem | undefined;
+
+		this.repository.provider.groups.elements.forEach(group => {
+			group.elements.forEach(resource => {
+				let currentItem: SCMItem | ISCMResource = resource;
+
+				// Build up to the closest parent in the tree already
+				if (root) {
+					let treeFound = false;
+					while (!treeFound) {
+						const parentUri: URI = currentItem instanceof SCMItem ? this.getParentUri(currentItem.resource) : this.getParentUri(currentItem.sourceUri);
+						const parentItem = root.hasChild(parentUri);
+						if (parentItem) {
+							// Parent is in the tree already
+							parentItem.addSCMChild(currentItem);
+							treeFound = true;
+						} else {
+							// Parent is not in the tree
+							const parent = new SCMItem(parentUri);
+							parent.addSCMChild(currentItem);
+							currentItem = parent;
+						}
+					}
+				}
+
+				// Build up to the root for the first time
+				while (!root) {
+					const parentUri: URI = currentItem instanceof SCMItem ? this.getParentUri(currentItem.resource) : this.getParentUri(currentItem.sourceUri);
+					const parent = new SCMItem(parentUri);
+
+					parent.addSCMChild(currentItem);
+					currentItem = parent;
+
+					if (parentUri.fsPath === rootUri.fsPath) {
+						// Found the root
+						const workspaceParentUri = this.getParentUri(currentItem.resource);
+						const workspaceParent = new SCMItem(workspaceParentUri);
+						workspaceParent.addSCMChild(parent);
+						root = workspaceParent;
+					}
+				}
+			});
+		});
+
+		if (root) {
+			if (root.scmChildren[0] instanceof SCMItem) {
+				this.reduceTree(<SCMItem>root.scmChildren[0]);
+			}
+
+			this.tree.setInput(root).then(() => {
+				this.tree.expandAll();
+			});
+		}
+	}
+
+	private reduceTree(root: SCMItem): void {
+		if (root.scmChildren.length === 1 && root.scmChildren[0] instanceof SCMItem) {
+			const childItem = (<SCMItem>root.scmChildren[0]);
+			root.rename({ name: root.name + '/' + childItem.name });
+			root.scmChildren = childItem.scmChildren;
+
+			this.reduceTree(root);
+		} else if (root.scmChildren.length > 1 && root.scmChildren[0] instanceof SCMItem) {
+			root.scmChildren.forEach(child => this.reduceTree(<SCMItem>child));
+		}
 	}
 
 	private onDidChangeVisibility(visible: boolean): void {
@@ -883,16 +1216,18 @@ export class RepositoryPanel extends ViewletPanel {
 
 			const editorHeight = this.inputBox.height;
 			const listHeight = height - (editorHeight + 12 /* margin */);
-			this.listContainer.style.height = `${listHeight}px`;
+			this.changesContainer.style.height = `${listHeight}px`;
 			this.list.layout(listHeight, width);
+			this.tree.layout(listHeight, width);
 
 			toggleClass(this.inputBoxContainer, 'scroll', editorHeight >= 134);
 		} else {
 			addClass(this.inputBoxContainer, 'hidden');
 			removeClass(this.inputBoxContainer, 'scroll');
 
-			this.listContainer.style.height = `${height}px`;
+			this.changesContainer.style.height = `${height}px`;
 			this.list.layout(height, width);
+			this.tree.layout(height, width);
 		}
 	}
 

@@ -66,7 +66,7 @@ Registry.as<IWorkbenchActionRegistry>(WorkbenchActionExtensions.WorkbenchActions
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'scm',
-	order: 5,
+	order: 6,
 	title: localize('scmConfigurationTitle', "SCM"),
 	type: 'object',
 	properties: {
@@ -95,6 +95,11 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		'scm.alwaysShowActions': {
 			type: 'boolean',
 			description: localize('alwaysShowActions', "Controls whether inline actions are always visible in the Source Control view."),
+			default: false
+		},
+		'scm.showChangesAsTree': {
+			type: 'boolean',
+			description: localize('showChangesAsTree', "Controls whether the Source Control changes are shown as a tree or a list."),
 			default: false
 		}
 	}
