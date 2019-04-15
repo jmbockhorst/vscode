@@ -14,7 +14,7 @@ import { append, $, addClass, toggleClass, trackFocus, removeClass, addClasses }
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { List } from 'vs/base/browser/ui/list/listWidget';
 import { IListVirtualDelegate, IListRenderer, IListContextMenuEvent, IListEvent, IKeyboardNavigationLabelProvider, IIdentityProvider } from 'vs/base/browser/ui/list/list';
-import { VIEWLET_ID, ISCMService, ISCMRepository, ISCMResourceGroup, ISCMResource, InputValidationType, VIEW_CONTAINER } from 'vs/workbench/contrib/scm/common/scm';
+import { VIEWLET_ID, ISCMService, ISCMRepository, ISCMResourceGroup, ISCMResource, InputValidationType, VIEW_CONTAINER, SCMExplorerItem } from 'vs/workbench/contrib/scm/common/scm';
 import { ResourceLabels, IResourceLabel } from 'vs/workbench/browser/labels';
 import { CountBadge } from 'vs/base/browser/ui/countBadge/countBadge';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
@@ -38,7 +38,7 @@ import { renderOcticons } from 'vs/base/browser/ui/octiconLabel/octiconLabel';
 import { format } from 'vs/base/common/strings';
 import { ISpliceable, ISequence, ISplice } from 'vs/base/common/sequence';
 import { firstIndex, equals } from 'vs/base/common/arrays';
-import { WorkbenchList, WorkbenchAsyncDataTree } from 'vs/platform/list/browser/listService';
+import { WorkbenchList, WorkbenchAsyncDataTree, TreeResourceNavigator2 } from 'vs/platform/list/browser/listService';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { ThrottledDelayer } from 'vs/base/common/async';
 import { INotificationService } from 'vs/platform/notification/common/notification';
@@ -51,11 +51,12 @@ import { IViewsRegistry, IViewDescriptor, Extensions } from 'vs/workbench/common
 import { Registry } from 'vs/platform/registry/common/platform';
 import { IFileTemplateData } from 'vs/workbench/contrib/files/browser/views/explorerViewer';
 import { ExplorerItem } from 'vs/workbench/contrib/files/common/explorerModel';
-import { IAsyncDataSource, ITreeRenderer, ITreeNode } from 'vs/base/browser/ui/tree/tree';
+import { IAsyncDataSource, ITreeRenderer, ITreeNode, ITreeContextMenuEvent, ITreeSorter } from 'vs/base/browser/ui/tree/tree';
 import { URI } from 'vs/base/common/uri';
 import { FuzzyScore } from 'vs/base/common/filters';
 import { IExplorerService, IFilesConfiguration } from 'vs/workbench/contrib/files/common/files';
 import { FileKind } from 'vs/platform/files/common/files';
+import { compareFileNames, compareFileExtensions } from 'vs/base/common/comparers';
 
 export interface ISpliceEvent<T> {
 	index: number;
@@ -525,14 +526,14 @@ class ResourceRenderer implements IListRenderer<ISCMResource, ResourceTemplate> 
 	}
 }
 
-class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, [], ResourceTemplate> {
+class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, any, ResourceTemplate> {
 
 	static TEMPLATE_ID = 'resourceTree';
 	get templateId(): string { return ResourceTreeRenderer.TEMPLATE_ID; }
 
 	constructor(
 		private labels: ResourceLabels,
-		private actionItemProvider: IActionItemProvider,
+		private actionViewItemProvider: IActionViewItemProvider,
 		private getSelectedResources: () => ISCMResource[],
 		private themeService: IThemeService,
 		private menus: SCMMenus
@@ -544,7 +545,7 @@ class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, [], ResourceTe
 		const fileLabel = this.labels.create(name);
 		const actionsContainer = append(fileLabel.element, $('.actions'));
 		const actionBar = new ActionBar(actionsContainer, {
-			actionItemProvider: this.actionItemProvider,
+			actionViewItemProvider: this.actionViewItemProvider,
 			actionRunner: new MultipleSelectionActionRunner(this.getSelectedResources)
 		});
 
@@ -558,7 +559,7 @@ class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, [], ResourceTe
 		};
 	}
 
-	renderElement(resource: ITreeNode<ISCMResource, []>, index: number, template: ResourceTemplate): void {
+	renderElement(resource: ITreeNode<ISCMResource, any>, index: number, template: ResourceTemplate): void {
 		template.elementDisposable.dispose();
 
 		const theme = this.themeService.getTheme();
@@ -567,7 +568,7 @@ class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, [], ResourceTe
 		template.fileLabel.setFile(resource.element.sourceUri, { fileDecorations: { colors: false, badges: !icon, data: resource.element.decorations } });
 		template.actionBar.context = resource;
 
-		const disposables: IDisposable[] = [];
+		const disposables = new DisposableStore();
 		disposables.push(connectPrimaryMenuToInlineActionBar(this.menus.getResourceMenu(resource.element.resourceGroup), template.actionBar));
 
 		toggleClass(template.name, 'strike-through', resource.element.decorations.strikeThrough);
@@ -583,10 +584,10 @@ class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, [], ResourceTe
 		}
 
 		template.element.setAttribute('data-tooltip', resource.element.decorations.tooltip || '');
-		template.elementDisposable = combinedDisposable(disposables);
+		template.elementDisposable = disposables;
 	}
 
-	disposeElement(resource: ITreeNode<ISCMResource, []>, index: number, template: ResourceTemplate): void {
+	disposeElement(resource: ITreeNode<ISCMResource>, index: number, template: ResourceTemplate): void {
 		template.elementDisposable.dispose();
 	}
 
@@ -659,6 +660,73 @@ class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, IFileT
 
 	dispose(): void {
 		this.configListener.dispose();
+	}
+}
+
+export class SCMSorter implements ITreeSorter<SCMExplorerItem | ISCMResource> {
+
+	constructor(
+		@IExplorerService private readonly explorerService: IExplorerService
+	) { }
+
+	public compare(statA: SCMExplorerItem | ISCMResource, statB: SCMExplorerItem | ISCMResource): number {
+		const sortOrder = this.explorerService.sortOrder;
+
+		// Sort Directories
+		switch (sortOrder) {
+			case 'type':
+				if (statA instanceof SCMExplorerItem && !(statB instanceof SCMExplorerItem)) {
+					return -1;
+				}
+
+				if (statB instanceof SCMExplorerItem && !(statA instanceof SCMExplorerItem)) {
+					return 1;
+				}
+
+				if (statA instanceof SCMExplorerItem && statB instanceof SCMExplorerItem) {
+					return compareFileNames(statA.name, statB.name);
+				}
+
+				break;
+
+			case 'filesFirst':
+				if (statA instanceof SCMExplorerItem && !(statB instanceof SCMExplorerItem)) {
+					return 1;
+				}
+
+				if (statB instanceof SCMExplorerItem && !(statA instanceof SCMExplorerItem)) {
+					return -1;
+				}
+
+				break;
+
+			case 'mixed':
+				break; // not sorting when "mixed" is on
+
+			default: /* 'default', 'modified' */
+				if (statA instanceof SCMExplorerItem && !(statB instanceof SCMExplorerItem)) {
+					return -1;
+				}
+
+				if (statB instanceof SCMExplorerItem && !(statA instanceof SCMExplorerItem)) {
+					return 1;
+				}
+
+				break;
+		}
+
+		// Sort Files
+		switch (sortOrder) {
+			case 'type':
+				return compareFileExtensions((<ISCMResource>statA).sourceUri.fsPath, (<ISCMResource>statB).sourceUri.fsPath);
+
+			default: /* 'default', 'mixed', 'filesFirst' */
+				if (statA instanceof SCMExplorerItem && statB instanceof SCMExplorerItem) {
+					return compareFileNames(statA.name, statB.name);
+				} else {
+					return compareFileNames((<ISCMResource>statA).sourceUri.fsPath, (<ISCMResource>statB).sourceUri.fsPath);
+				}
+		}
 	}
 }
 
@@ -839,46 +907,15 @@ function convertValidationType(type: InputValidationType): MessageType {
 	}
 }
 
-class SCMItem extends ExplorerItem {
-	public scmChildren: (SCMItem | ISCMResource)[] = [];
-	constructor(public resource: URI) {
-		super(resource, undefined, true, false, false);
-	}
-
-	public addSCMChild(newChild: SCMItem | ISCMResource) {
-		this.scmChildren.push(newChild);
-	}
-
-	public hasChild(childUri: URI): SCMItem | undefined {
-		if (this.resource.fsPath === childUri.fsPath) {
-			return this;
-		}
-
-		for (const child of this.scmChildren) {
-			if (child instanceof SCMItem) {
-				if (child.hasChild(childUri)) {
-					return child.hasChild(childUri);
-				}
-			}
-		}
-
-		return undefined;
-	}
-
-	get isRoot(): boolean {
-		return false;
-	}
-}
-
-class SCMDataSource implements IAsyncDataSource<SCMItem | ISCMResource, SCMItem | ISCMResource> {
+class SCMDataSource implements IAsyncDataSource<SCMExplorerItem | ISCMResource, SCMExplorerItem | ISCMResource> {
 	constructor() { }
 
-	hasChildren(element: SCMItem | ISCMResource): boolean {
-		return element instanceof SCMItem && element.scmChildren.length > 0;
+	hasChildren(element: SCMExplorerItem | ISCMResource): boolean {
+		return element instanceof SCMExplorerItem && element.scmChildren.length > 0;
 	}
 
-	getChildren(element: SCMItem | ISCMResource): Promise<(SCMItem | ISCMResource)[]> {
-		if (element instanceof SCMItem) {
+	getChildren(element: SCMExplorerItem | ISCMResource): Promise<(SCMExplorerItem | ISCMResource)[]> {
+		if (element instanceof SCMExplorerItem) {
 			return Promise.resolve(element.scmChildren);
 		} else {
 			return Promise.reject('No children');
@@ -886,16 +923,16 @@ class SCMDataSource implements IAsyncDataSource<SCMItem | ISCMResource, SCMItem 
 	}
 }
 
-class SCMDelagate implements IListVirtualDelegate<SCMItem | ISCMResource> {
+class SCMDelagate implements IListVirtualDelegate<SCMExplorerItem | ISCMResource> {
 
 	private static readonly ITEM_HEIGHT = 22;
 
-	getHeight(element: SCMItem | ISCMResource): number {
+	getHeight(element: SCMExplorerItem | ISCMResource): number {
 		return SCMDelagate.ITEM_HEIGHT;
 	}
 
-	getTemplateId(element: SCMItem | ISCMResource): string {
-		if (element instanceof SCMItem) {
+	getTemplateId(element: SCMExplorerItem | ISCMResource): string {
+		if (element instanceof SCMExplorerItem) {
 			return SCMFilesRenderer.ID;
 		} else {
 			return ResourceTreeRenderer.TEMPLATE_ID;
@@ -911,7 +948,7 @@ export class RepositoryPanel extends ViewletPanel {
 	private inputBox: InputBox;
 	private changesContainer: HTMLElement;
 	private list: List<ISCMResourceGroup | ISCMResource>;
-	private tree: WorkbenchAsyncDataTree<SCMItem | ISCMResource, SCMItem | ISCMResource>;
+	private tree: WorkbenchAsyncDataTree<SCMExplorerItem | ISCMResource, SCMExplorerItem | ISCMResource>;
 	private listLabels: ResourceLabels;
 	private menus: SCMMenus;
 	private visibilityDisposables: IDisposable[] = [];
@@ -1073,26 +1110,38 @@ export class RepositoryPanel extends ViewletPanel {
 		const explorerLabels = this.instantiationService.createInstance(ResourceLabels, { onDidChangeVisibility: this.onDidChangeBodyVisibility });
 		const updateWidth = (stat: ExplorerItem) => { };
 		const filesRenderer = this.instantiationService.createInstance(SCMFilesRenderer, explorerLabels, updateWidth);
-		const resourceTreeRenderer = this.instantiationService.createInstance(ResourceTreeRenderer, this.listLabels, actionItemProvider, () => this.getSelectedResources(), this.themeService, this.menus);
+		const resourceTreeRenderer = this.instantiationService.createInstance(ResourceTreeRenderer, this.listLabels, actionViewItemProvider, () => this.getSelectedResources(), this.themeService, this.menus);
 
 		this.tree = this.instantiationService.createInstance(WorkbenchAsyncDataTree, this.changesContainer, new SCMDelagate(), [filesRenderer, resourceTreeRenderer],
 			this.instantiationService.createInstance(SCMDataSource), {
 				identityProvider: {
-					getId: (stat: SCMItem | ISCMResource) => {
-						if (stat instanceof SCMItem) {
+					getId: (stat: SCMExplorerItem | ISCMResource) => {
+						if (stat instanceof SCMExplorerItem) {
 							return stat.resource;
 						} else {
 							return stat.sourceUri;
 						}
 					}
 				},
+				sorter: this.instantiationService.createInstance(SCMSorter),
 				autoExpandSingleChildren: true
-			}) as WorkbenchAsyncDataTree<SCMItem | ISCMResource, SCMItem | ISCMResource>;
+			}) as WorkbenchAsyncDataTree<SCMExplorerItem | ISCMResource, SCMExplorerItem | ISCMResource>;
 
 
 		this.buildTree();
 		this.repository.provider.onDidChangeResources(() => this.buildTree());
+		this.tree.onContextMenu(this.onTreeContextMenu, this, this.disposables);
 		this.disposables.push(this.tree);
+
+		const explorerNavigator = new TreeResourceNavigator2(this.tree);
+		this.disposables.push(explorerNavigator);
+
+		// Open when selecting via keyboard
+		this.disposables.push(explorerNavigator.onDidOpenResource(e => {
+			if (e.element && isSCMResource(<ISCMResource>e.element)) {
+				(<ISCMResource>e.element).open();
+			}
+		}));
 
 		this.updateChanges();
 
@@ -1127,17 +1176,17 @@ export class RepositoryPanel extends ViewletPanel {
 			return;
 		}
 
-		let root: SCMItem | undefined;
+		let root: SCMExplorerItem | undefined;
 
 		this.repository.provider.groups.elements.forEach(group => {
 			group.elements.forEach(resource => {
-				let currentItem: SCMItem | ISCMResource = resource;
+				let currentItem: SCMExplorerItem | ISCMResource = resource;
 
 				// Build up to the closest parent in the tree already
 				if (root) {
 					let treeFound = false;
 					while (!treeFound) {
-						const parentUri: URI = currentItem instanceof SCMItem ? this.getParentUri(currentItem.resource) : this.getParentUri(currentItem.sourceUri);
+						const parentUri: URI = currentItem instanceof SCMExplorerItem ? this.getParentUri(currentItem.resource) : this.getParentUri(currentItem.sourceUri);
 						const parentItem = root.hasChild(parentUri);
 						if (parentItem) {
 							// Parent is in the tree already
@@ -1145,7 +1194,7 @@ export class RepositoryPanel extends ViewletPanel {
 							treeFound = true;
 						} else {
 							// Parent is not in the tree
-							const parent = new SCMItem(parentUri);
+							const parent = new SCMExplorerItem(parentUri);
 							parent.addSCMChild(currentItem);
 							currentItem = parent;
 						}
@@ -1154,8 +1203,8 @@ export class RepositoryPanel extends ViewletPanel {
 
 				// Build up to the root for the first time
 				while (!root) {
-					const parentUri: URI = currentItem instanceof SCMItem ? this.getParentUri(currentItem.resource) : this.getParentUri(currentItem.sourceUri);
-					const parent = new SCMItem(parentUri);
+					const parentUri: URI = currentItem instanceof SCMExplorerItem ? this.getParentUri(currentItem.resource) : this.getParentUri(currentItem.sourceUri);
+					const parent = new SCMExplorerItem(parentUri);
 
 					parent.addSCMChild(currentItem);
 					currentItem = parent;
@@ -1163,7 +1212,7 @@ export class RepositoryPanel extends ViewletPanel {
 					if (parentUri.fsPath === rootUri.fsPath) {
 						// Found the root
 						const workspaceParentUri = this.getParentUri(currentItem.resource);
-						const workspaceParent = new SCMItem(workspaceParentUri);
+						const workspaceParent = new SCMExplorerItem(workspaceParentUri);
 						workspaceParent.addSCMChild(parent);
 						root = workspaceParent;
 					}
@@ -1172,8 +1221,8 @@ export class RepositoryPanel extends ViewletPanel {
 		});
 
 		if (root) {
-			if (root.scmChildren[0] instanceof SCMItem) {
-				this.reduceTree(<SCMItem>root.scmChildren[0]);
+			if (root.scmChildren[0] instanceof SCMExplorerItem) {
+				this.flattenTree(<SCMExplorerItem>root.scmChildren[0]);
 			}
 
 			this.tree.setInput(root).then(() => {
@@ -1182,15 +1231,15 @@ export class RepositoryPanel extends ViewletPanel {
 		}
 	}
 
-	private reduceTree(root: SCMItem): void {
-		if (root.scmChildren.length === 1 && root.scmChildren[0] instanceof SCMItem) {
-			const childItem = (<SCMItem>root.scmChildren[0]);
+	private flattenTree(root: SCMExplorerItem): void {
+		if (root.scmChildren.length === 1 && root.scmChildren[0] instanceof SCMExplorerItem) {
+			const childItem = (<SCMExplorerItem>root.scmChildren[0]);
 			root.rename({ name: root.name + '/' + childItem.name });
 			root.scmChildren = childItem.scmChildren;
 
-			this.reduceTree(root);
-		} else if (root.scmChildren.length > 1 && root.scmChildren[0] instanceof SCMItem) {
-			root.scmChildren.forEach(child => this.reduceTree(<SCMItem>child));
+			this.flattenTree(root);
+		} else if (root.scmChildren.length > 1 && root.scmChildren[0] instanceof SCMExplorerItem) {
+			root.scmChildren.forEach(child => this.flattenTree(<SCMExplorerItem>child));
 		}
 	}
 
@@ -1288,6 +1337,28 @@ export class RepositoryPanel extends ViewletPanel {
 			actions = this.menus.getResourceContextActions(element);
 		} else {
 			actions = this.menus.getResourceGroupContextActions(element);
+		}
+
+		this.contextMenuService.showContextMenu({
+			getAnchor: () => e.anchor,
+			getActions: () => actions,
+			getActionsContext: () => element,
+			actionRunner: new MultipleSelectionActionRunner(() => this.getSelectedResources())
+		});
+	}
+
+	private onTreeContextMenu(e: ITreeContextMenuEvent<SCMExplorerItem | ISCMResource>): void {
+		if (!e.element) {
+			return;
+		}
+
+		const element = e.element;
+		let actions: IAction[];
+
+		if (element instanceof SCMExplorerItem) {
+			actions = this.menus.getExplorerItemContextActions(element);
+		} else {
+			actions = this.menus.getResourceContextActions(element);
 		}
 
 		this.contextMenuService.showContextMenu({

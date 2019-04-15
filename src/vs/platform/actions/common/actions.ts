@@ -88,6 +88,7 @@ export const enum MenuId {
 	SCMChangeContext,
 	SCMResourceContext,
 	SCMResourceGroupContext,
+	SCMResourceTreeContext,
 	SCMSourceControl,
 	SCMTitle,
 	SearchContext,

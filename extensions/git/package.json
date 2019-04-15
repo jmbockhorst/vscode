@@ -154,6 +154,24 @@
         }
       },
       {
+        "command": "git.stageDirectory",
+        "title": "%command.stageDirectory%",
+        "category": "Git",
+        "icon": {
+          "light": "resources/icons/light/stage.svg",
+          "dark": "resources/icons/dark/stage.svg"
+        }
+      },
+      {
+        "command": "git.unstageDirectory",
+        "title": "%command.unstageDirectory%",
+        "category": "Git",
+        "icon": {
+          "light": "resources/icons/light/unstage.svg",
+          "dark": "resources/icons/dark/unstage.svg"
+        }
+      },
+      {
         "command": "git.unstageSelectedRanges",
         "title": "%command.unstageSelectedRanges%",
         "category": "Git"
@@ -841,6 +859,23 @@
           "command": "git.cleanAll",
           "when": "scmProvider == git && scmResourceGroup == workingTree && !gitFreshRepository",
           "group": "inline"
+        },
+        {
+          "command": "git.stageAll",
+          "when": "scmProvider == git && scmResourceGroup == workingTree",
+          "group": "inline"
+        }
+      ],
+      "scm/resourceTree/context": [
+        {
+          "command": "git.stageDirectory",
+          "when": "scmProvider == git",
+          "group": "1_modification"
+        },
+        {
+          "command": "git.unstageDirectory",
+          "when": "scmProvider == git",
+          "group": "1_modification"
         },
         {
           "command": "git.stageAll",

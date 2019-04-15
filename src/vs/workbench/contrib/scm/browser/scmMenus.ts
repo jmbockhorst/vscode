@@ -10,7 +10,7 @@ import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IMenuService, MenuId, IMenu } from 'vs/platform/actions/common/actions';
 import { IAction } from 'vs/base/common/actions';
 import { fillInContextMenuActions, fillInActionBarActions } from 'vs/platform/actions/browser/menuEntryActionViewItem';
-import { ISCMProvider, ISCMResource, ISCMResourceGroup } from 'vs/workbench/contrib/scm/common/scm';
+import { ISCMProvider, ISCMResource, ISCMResourceGroup, SCMExplorerItem } from 'vs/workbench/contrib/scm/common/scm';
 import { isSCMResource } from './scmUtil';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
 import { equals } from 'vs/base/common/arrays';
@@ -27,10 +27,11 @@ interface ISCMResourceGroupMenuEntry extends IDisposable {
 interface ISCMMenus {
 	readonly resourceGroupMenu: IMenu;
 	readonly resourceMenu: IMenu;
+	readonly explorerItemMenu: IMenu;
 }
 
-export function getSCMResourceContextKey(resource: ISCMResourceGroup | ISCMResource): string {
-	return isSCMResource(resource) ? resource.resourceGroup.id : resource.id;
+export function getSCMResourceContextKey(resource: ISCMResourceGroup | ISCMResource | SCMExplorerItem): string {
+	return resource instanceof SCMExplorerItem ? 'index' : isSCMResource(resource) ? resource.resourceGroup.id : resource.id;
 }
 
 export class SCMMenus implements IDisposable {
@@ -100,11 +101,15 @@ export class SCMMenus implements IDisposable {
 		return this.getActions(MenuId.SCMResourceGroupContext, group).secondary;
 	}
 
+	getExplorerItemContextActions(item: SCMExplorerItem): IAction[] {
+		return this.getActions(MenuId.SCMResourceTreeContext, item).secondary;
+	}
+
 	getResourceContextActions(resource: ISCMResource): IAction[] {
 		return this.getActions(MenuId.SCMResourceContext, resource).secondary;
 	}
 
-	private getActions(menuId: MenuId, resource: ISCMResourceGroup | ISCMResource): { primary: IAction[]; secondary: IAction[]; } {
+	private getActions(menuId: MenuId, resource: ISCMResourceGroup | ISCMResource | SCMExplorerItem): { primary: IAction[]; secondary: IAction[]; } {
 		const contextKeyService = this.contextKeyService.createScoped();
 		contextKeyService.createKey('scmResourceGroup', getSCMResourceContextKey(resource));
 
@@ -144,8 +149,9 @@ export class SCMMenus implements IDisposable {
 
 			const resourceGroupMenu = this.menuService.createMenu(MenuId.SCMResourceGroupContext, contextKeyService);
 			const resourceMenu = this.menuService.createMenu(MenuId.SCMResourceContext, contextKeyService);
+			const explorerItemMenu = this.menuService.createMenu(MenuId.SCMResourceTreeContext, contextKeyService);
 
-			this.resourceGroupMenus.set(group, { resourceGroupMenu, resourceMenu });
+			this.resourceGroupMenus.set(group, { resourceGroupMenu, resourceMenu, explorerItemMenu });
 
 			return {
 				group,
@@ -153,6 +159,7 @@ export class SCMMenus implements IDisposable {
 					contextKeyService.dispose();
 					resourceGroupMenu.dispose();
 					resourceMenu.dispose();
+					explorerItemMenu.dispose();
 				}
 			};
 		});

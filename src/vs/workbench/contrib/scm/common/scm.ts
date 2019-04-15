@@ -12,6 +12,7 @@ import { IDisposable } from 'vs/base/common/lifecycle';
 import { Command } from 'vs/editor/common/modes';
 import { ColorIdentifier } from 'vs/platform/theme/common/colorRegistry';
 import { ISequence } from 'vs/base/common/sequence';
+import { ExplorerItem } from 'vs/workbench/contrib/files/common/explorerModel';
 
 export const VIEWLET_ID = 'workbench.view.scm';
 export const VIEW_CONTAINER: ViewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer(VIEWLET_ID);
@@ -32,6 +33,37 @@ export interface ISCMResourceDecorations {
 	source?: string;
 	letter?: string;
 	color?: ColorIdentifier;
+}
+
+export class SCMExplorerItem extends ExplorerItem {
+	public scmChildren: (SCMExplorerItem | ISCMResource)[] = [];
+	constructor(public resource: URI) {
+		super(resource, undefined, true, false, false);
+	}
+
+	public addSCMChild(newChild: SCMExplorerItem | ISCMResource) {
+		this.scmChildren.push(newChild);
+	}
+
+	public hasChild(childUri: URI): SCMExplorerItem | undefined {
+		if (this.resource.fsPath === childUri.fsPath) {
+			return this;
+		}
+
+		for (const child of this.scmChildren) {
+			if (child instanceof SCMExplorerItem) {
+				if (child.hasChild(childUri)) {
+					return child.hasChild(childUri);
+				}
+			}
+		}
+
+		return undefined;
+	}
+
+	get isRoot(): boolean {
+		return false;
+	}
 }
 
 export interface ISCMResource {

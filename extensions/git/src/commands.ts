@@ -870,6 +870,16 @@ export class CommandCenter {
 		await repository.add([]);
 	}
 
+	@command('git.stageDirectory', { repository: true })
+	async stageDirectory(repository: Repository, directory: any): Promise<void> {
+		await repository.add([directory.resource]);
+	}
+
+	@command('git.unstageDirectory', { repository: true })
+	async unstageDirectory(repository: Repository, directory: any): Promise<void> {
+		await repository.revert([directory.resource]);
+	}
+
 	private async _stageDeletionConflict(repository: Repository, uri: Uri): Promise<void> {
 		const uriString = uri.toString();
 		const resource = repository.mergeGroup.resourceStates.filter(r => r.resourceUri.toString() === uriString)[0];
