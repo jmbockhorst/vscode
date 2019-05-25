@@ -566,7 +566,7 @@ class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, any, ResourceT
 		const icon = theme.type === LIGHT ? resource.element.decorations.icon : resource.element.decorations.iconDark;
 
 		template.fileLabel.setFile(resource.element.sourceUri, { fileDecorations: { colors: false, badges: !icon, data: resource.element.decorations } });
-		template.actionBar.context = resource;
+		template.actionBar.context = resource.element;
 
 		const disposables = new DisposableStore();
 		disposables.push(connectPrimaryMenuToInlineActionBar(this.menus.getResourceMenu(resource.element.resourceGroup), template.actionBar));
@@ -597,7 +597,14 @@ class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, any, ResourceT
 	}
 }
 
-class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, IFileTemplateData>, IDisposable {
+interface SCMFilesTemplate {
+	container: HTMLElement;
+	label: IResourceLabel;
+	actionBar: ActionBar;
+	elementDisposable: IDisposable;
+}
+
+class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, SCMFilesTemplate>, IDisposable {
 	static readonly ID = 'scmFile';
 
 	private config: IFilesConfiguration;
@@ -605,6 +612,9 @@ class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, IFileT
 
 	constructor(
 		private labels: ResourceLabels,
+		private actionViewItemProvider: IActionViewItemProvider,
+		private getSelectedResources: () => ISCMResource[],
+		private menus: SCMMenus,
 		private updateWidth: (stat: ExplorerItem) => void,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IExplorerService private readonly explorerService: IExplorerService
@@ -621,14 +631,20 @@ class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, IFileT
 		return SCMFilesRenderer.ID;
 	}
 
-	renderTemplate(container: HTMLElement): IFileTemplateData {
+	renderTemplate(container: HTMLElement): SCMFilesTemplate {
 		const elementDisposable = Disposable.None;
-		const label = this.labels.create(container, { supportHighlights: true });
+		const element = append(container, $('.tree-resource-group'));
+		const label = this.labels.create(element, { supportHighlights: true });
+		const actionsContainer = append(label.element, $('.actions'));
+		const actionBar = new ActionBar(actionsContainer, {
+			actionViewItemProvider: this.actionViewItemProvider,
+			actionRunner: new MultipleSelectionActionRunner(this.getSelectedResources)
+		});
 
-		return { elementDisposable, label, container };
+		return { container, label, actionBar, elementDisposable };
 	}
 
-	renderElement(node: ITreeNode<ExplorerItem, FuzzyScore>, index: number, templateData: IFileTemplateData): void {
+	renderElement(node: ITreeNode<ExplorerItem, FuzzyScore>, index: number, templateData: SCMFilesTemplate): void {
 		templateData.elementDisposable.dispose();
 		const stat = node.element;
 		const editableData = this.explorerService.getEditableData(stat);
@@ -643,9 +659,17 @@ class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, IFileT
 				fileKind: FileKind.FOLDER
 			});
 
-			templateData.elementDisposable = templateData.label.onDidRender(() => {
+			templateData.actionBar.clear();
+			templateData.actionBar.context = node.element;
+
+			const disposables = new DisposableStore();
+			disposables.push(connectPrimaryMenuToInlineActionBar(this.menus.getTreeResourceMenu(), templateData.actionBar));
+
+			disposables.push(templateData.label.onDidRender(() => {
 				this.updateWidth(stat);
-			});
+			}));
+
+			templateData.elementDisposable = disposables;
 		}
 	}
 
@@ -1067,13 +1091,14 @@ export class RepositoryPanel extends ViewletPanel {
 		this.repository.input.onDidChangeVisibility(this.updateInputBoxVisibility, this, this.disposables);
 		this.updateInputBoxVisibility();
 
-		// List
+		// Changes container
 		this.changesContainer = append(container, $('.scm-status.show-file-icons'));
 
 		const updateActionsVisibility = () => toggleClass(this.changesContainer, 'show-actions', this.configurationService.getValue<boolean>('scm.alwaysShowActions'));
 		Event.filter(this.configurationService.onDidChangeConfiguration, e => e.affectsConfiguration('scm.alwaysShowActions'))(updateActionsVisibility);
 		updateActionsVisibility();
 
+		// Show the changes as a list
 		const delegate = new ProviderListDelegate();
 
 		const actionViewItemProvider = (action: IAction) => this.getActionViewItem(action);
@@ -1086,7 +1111,6 @@ export class RepositoryPanel extends ViewletPanel {
 			new ResourceRenderer(this.listLabels, actionViewItemProvider, () => this.getSelectedResources(), this.themeService, this.menus)
 		];
 
-		// Show the changes as a list
 		this.list = this.instantiationService.createInstance(WorkbenchList, this.changesContainer, delegate, renderers, {
 			identityProvider: scmResourceIdentityProvider,
 			keyboardNavigationLabelProvider: scmKeyboardNavigationLabelProvider,
@@ -1109,7 +1133,7 @@ export class RepositoryPanel extends ViewletPanel {
 		// Show the changes as a tree
 		const explorerLabels = this.instantiationService.createInstance(ResourceLabels, { onDidChangeVisibility: this.onDidChangeBodyVisibility });
 		const updateWidth = (stat: ExplorerItem) => { };
-		const filesRenderer = this.instantiationService.createInstance(SCMFilesRenderer, explorerLabels, updateWidth);
+		const filesRenderer = this.instantiationService.createInstance(SCMFilesRenderer, explorerLabels, actionViewItemProvider, () => this.getSelectedResources(), this.menus, updateWidth);
 		const resourceTreeRenderer = this.instantiationService.createInstance(ResourceTreeRenderer, this.listLabels, actionViewItemProvider, () => this.getSelectedResources(), this.themeService, this.menus);
 
 		this.tree = this.instantiationService.createInstance(WorkbenchAsyncDataTree, this.changesContainer, new SCMDelagate(), [filesRenderer, resourceTreeRenderer],

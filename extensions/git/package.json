@@ -878,8 +878,13 @@
           "group": "1_modification"
         },
         {
-          "command": "git.stageAll",
-          "when": "scmProvider == git && scmResourceGroup == workingTree",
+          "command": "git.stageDirectory",
+          "when": "scmProvider == git",
+          "group": "inline"
+        },
+        {
+          "command": "git.unstageDirectory",
+          "when": "scmProvider == git",
           "group": "inline"
         }
       ],

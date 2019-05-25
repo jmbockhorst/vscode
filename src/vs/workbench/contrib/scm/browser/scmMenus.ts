@@ -46,6 +46,7 @@ export class SCMMenus implements IDisposable {
 
 	private readonly resourceGroupMenuEntries: ISCMResourceGroupMenuEntry[] = [];
 	private readonly resourceGroupMenus = new Map<ISCMResourceGroup, ISCMMenus>();
+	private treeResourceGroupMenu: IMenu;
 
 	private readonly disposables: IDisposable[] = [];
 
@@ -141,6 +142,14 @@ export class SCMMenus implements IDisposable {
 		return this.resourceGroupMenus.get(group)!.resourceMenu;
 	}
 
+	getTreeResourceMenu(): IMenu {
+		if (!this.treeResourceGroupMenu) {
+			throw new Error('SCM Resource Group menu not found');
+		}
+
+		return this.treeResourceGroupMenu;
+	}
+
 	private onDidSpliceGroups({ start, deleteCount, toInsert }: ISplice<ISCMResourceGroup>): void {
 		const menuEntriesToInsert = toInsert.map<ISCMResourceGroupMenuEntry>(group => {
 			const contextKeyService = this.contextKeyService.createScoped();
@@ -150,6 +159,7 @@ export class SCMMenus implements IDisposable {
 			const resourceGroupMenu = this.menuService.createMenu(MenuId.SCMResourceGroupContext, contextKeyService);
 			const resourceMenu = this.menuService.createMenu(MenuId.SCMResourceContext, contextKeyService);
 			const explorerItemMenu = this.menuService.createMenu(MenuId.SCMResourceTreeContext, contextKeyService);
+			this.treeResourceGroupMenu = explorerItemMenu;
 
 			this.resourceGroupMenus.set(group, { resourceGroupMenu, resourceMenu, explorerItemMenu });
 
