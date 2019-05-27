@@ -172,6 +172,15 @@
         }
       },
       {
+        "command": "git.cleanDirectory",
+        "title": "%command.cleanDirectory%",
+        "category": "Git",
+        "icon": {
+          "light": "resources/icons/light/clean.svg",
+          "dark": "resources/icons/dark/clean.svg"
+        }
+      },
+      {
         "command": "git.unstageSelectedRanges",
         "title": "%command.unstageSelectedRanges%",
         "category": "Git"
@@ -869,22 +878,32 @@
       "scm/resourceTree/context": [
         {
           "command": "git.stageDirectory",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && scmResourceGroup == workingTree",
           "group": "1_modification"
         },
         {
           "command": "git.unstageDirectory",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && scmResourceGroup == index",
+          "group": "1_modification"
+        },
+        {
+          "command": "git.cleanDirectory",
+          "when": "scmProvider == git && scmResourceGroup == workingTree && !gitFreshRepository",
           "group": "1_modification"
         },
         {
           "command": "git.stageDirectory",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && scmResourceGroup == workingTree",
           "group": "inline"
         },
         {
           "command": "git.unstageDirectory",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && scmResourceGroup == index",
+          "group": "inline"
+        },
+        {
+          "command": "git.cleanDirectory",
+          "when": "scmProvider == git && scmResourceGroup == workingTree && !gitFreshRepository",
           "group": "inline"
         }
       ],

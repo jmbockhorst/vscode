@@ -587,12 +587,67 @@ class ResourceTreeRenderer implements ITreeRenderer<ISCMResource, any, ResourceT
 		template.elementDisposable = disposables;
 	}
 
-	disposeElement(resource: ITreeNode<ISCMResource>, index: number, template: ResourceTemplate): void {
+	disposeElement(resource: ITreeNode<ISCMResource, any>, index: number, template: ResourceTemplate): void {
 		template.elementDisposable.dispose();
 	}
 
 	disposeTemplate(template: ResourceTemplate): void {
 		template.elementDisposable.dispose();
+		template.dispose();
+	}
+}
+
+class ResourceGroupTreeRenderer implements ITreeRenderer<ISCMResourceGroup, any, ResourceGroupTemplate> {
+
+	static TEMPLATE_ID = 'resourceGroupTree';
+	get templateId(): string { return ResourceGroupTreeRenderer.TEMPLATE_ID; }
+
+	constructor(
+		private actionViewItemProvider: IActionViewItemProvider,
+		private themeService: IThemeService,
+		private menus: SCMMenus
+	) { }
+
+	renderTemplate(container: HTMLElement): ResourceGroupTemplate {
+		const element = append(container, $('.resource-group'));
+		const name = append(element, $('.name'));
+		const actionsContainer = append(element, $('.actions'));
+		const actionBar = new ActionBar(actionsContainer, { actionViewItemProvider: this.actionViewItemProvider });
+		const countContainer = append(element, $('.count'));
+		const count = new CountBadge(countContainer);
+		const styler = attachBadgeStyler(count, this.themeService);
+		const elementDisposable = Disposable.None;
+
+		return {
+			name, count, actionBar, elementDisposable, dispose: () => {
+				actionBar.dispose();
+				styler.dispose();
+			}
+		};
+	}
+
+	renderElement(group: ITreeNode<ISCMResourceGroup, any>, index: number, template: ResourceGroupTemplate): void {
+		template.elementDisposable.dispose();
+
+		template.name.textContent = group.element.label;
+		template.actionBar.clear();
+		template.actionBar.context = group.element;
+
+		const disposables = new DisposableStore();
+		disposables.push(connectPrimaryMenuToInlineActionBar(this.menus.getResourceGroupMenu(group.element), template.actionBar));
+
+		const updateCount = () => template.count.setCount(group.element.elements.length);
+		disposables.push(group.element.onDidSplice(updateCount, null));
+		updateCount();
+
+		template.elementDisposable = disposables;
+	}
+
+	disposeElement(group: ITreeNode<ISCMResourceGroup, any>, index: number, template: ResourceGroupTemplate): void {
+		template.elementDisposable.dispose();
+	}
+
+	disposeTemplate(template: ResourceGroupTemplate): void {
 		template.dispose();
 	}
 }
@@ -604,7 +659,7 @@ interface SCMFilesTemplate {
 	elementDisposable: IDisposable;
 }
 
-class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, SCMFilesTemplate>, IDisposable {
+class SCMFilesRenderer implements ITreeRenderer<SCMExplorerItem, FuzzyScore, SCMFilesTemplate>, IDisposable {
 	static readonly ID = 'scmFile';
 
 	private config: IFilesConfiguration;
@@ -644,7 +699,7 @@ class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, SCMFil
 		return { container, label, actionBar, elementDisposable };
 	}
 
-	renderElement(node: ITreeNode<ExplorerItem, FuzzyScore>, index: number, templateData: SCMFilesTemplate): void {
+	renderElement(node: ITreeNode<SCMExplorerItem, FuzzyScore>, index: number, templateData: SCMFilesTemplate): void {
 		templateData.elementDisposable.dispose();
 		const stat = node.element;
 		const editableData = this.explorerService.getEditableData(stat);
@@ -663,7 +718,7 @@ class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, SCMFil
 			templateData.actionBar.context = node.element;
 
 			const disposables = new DisposableStore();
-			disposables.push(connectPrimaryMenuToInlineActionBar(this.menus.getTreeResourceMenu(), templateData.actionBar));
+			disposables.push(connectPrimaryMenuToInlineActionBar(this.menus.getTreeResourceMenu(stat.resourceGroup!), templateData.actionBar));
 
 			disposables.push(templateData.label.onDidRender(() => {
 				this.updateWidth(stat);
@@ -687,14 +742,20 @@ class SCMFilesRenderer implements ITreeRenderer<ExplorerItem, FuzzyScore, SCMFil
 	}
 }
 
-export class SCMSorter implements ITreeSorter<SCMExplorerItem | ISCMResource> {
+export class SCMSorter implements ITreeSorter<SCMExplorerItem | ISCMResource | ISCMResourceGroup> {
 
 	constructor(
 		@IExplorerService private readonly explorerService: IExplorerService
 	) { }
 
-	public compare(statA: SCMExplorerItem | ISCMResource, statB: SCMExplorerItem | ISCMResource): number {
+	public compare(statA: SCMExplorerItem | ISCMResource | ISCMResourceGroup, statB: SCMExplorerItem | ISCMResource | ISCMResourceGroup): number {
 		const sortOrder = this.explorerService.sortOrder;
+
+		// Leave the ResourceGroups in the same position
+		if ((!(statA instanceof SCMExplorerItem) && !isSCMResource(statA)) ||
+			(!(statB instanceof SCMExplorerItem) && !isSCMResource(statB))) {
+			return 0;
+		}
 
 		// Sort Directories
 		switch (sortOrder) {
@@ -931,14 +992,14 @@ function convertValidationType(type: InputValidationType): MessageType {
 	}
 }
 
-class SCMDataSource implements IAsyncDataSource<SCMExplorerItem | ISCMResource, SCMExplorerItem | ISCMResource> {
+class SCMDataSource implements IAsyncDataSource<SCMExplorerItem | ISCMResource | ISCMResourceGroup, SCMExplorerItem | ISCMResource | ISCMResourceGroup> {
 	constructor() { }
 
-	hasChildren(element: SCMExplorerItem | ISCMResource): boolean {
+	hasChildren(element: SCMExplorerItem | ISCMResource | ISCMResourceGroup): boolean {
 		return element instanceof SCMExplorerItem && element.scmChildren.length > 0;
 	}
 
-	getChildren(element: SCMExplorerItem | ISCMResource): Promise<(SCMExplorerItem | ISCMResource)[]> {
+	getChildren(element: SCMExplorerItem | ISCMResource | ISCMResourceGroup): Promise<(SCMExplorerItem | ISCMResource | ISCMResourceGroup)[]> {
 		if (element instanceof SCMExplorerItem) {
 			return Promise.resolve(element.scmChildren);
 		} else {
@@ -947,19 +1008,21 @@ class SCMDataSource implements IAsyncDataSource<SCMExplorerItem | ISCMResource, 
 	}
 }
 
-class SCMDelagate implements IListVirtualDelegate<SCMExplorerItem | ISCMResource> {
+class SCMDelagate implements IListVirtualDelegate<SCMExplorerItem | ISCMResource | ISCMResourceGroup> {
 
 	private static readonly ITEM_HEIGHT = 22;
 
-	getHeight(element: SCMExplorerItem | ISCMResource): number {
+	getHeight(element: SCMExplorerItem | ISCMResource | ISCMResourceGroup): number {
 		return SCMDelagate.ITEM_HEIGHT;
 	}
 
-	getTemplateId(element: SCMExplorerItem | ISCMResource): string {
+	getTemplateId(element: SCMExplorerItem | ISCMResource | ISCMResourceGroup): string {
 		if (element instanceof SCMExplorerItem) {
 			return SCMFilesRenderer.ID;
-		} else {
+		} else if (isSCMResource(element)) {
 			return ResourceTreeRenderer.TEMPLATE_ID;
+		} else {
+			return ResourceGroupTreeRenderer.TEMPLATE_ID;
 		}
 	}
 }
@@ -972,7 +1035,7 @@ export class RepositoryPanel extends ViewletPanel {
 	private inputBox: InputBox;
 	private changesContainer: HTMLElement;
 	private list: List<ISCMResourceGroup | ISCMResource>;
-	private tree: WorkbenchAsyncDataTree<SCMExplorerItem | ISCMResource, SCMExplorerItem | ISCMResource>;
+	private tree: WorkbenchAsyncDataTree<SCMExplorerItem | ISCMResource | ISCMResourceGroup, SCMExplorerItem | ISCMResource | ISCMResourceGroup>;
 	private listLabels: ResourceLabels;
 	private menus: SCMMenus;
 	private visibilityDisposables: IDisposable[] = [];
@@ -1135,21 +1198,24 @@ export class RepositoryPanel extends ViewletPanel {
 		const updateWidth = (stat: ExplorerItem) => { };
 		const filesRenderer = this.instantiationService.createInstance(SCMFilesRenderer, explorerLabels, actionViewItemProvider, () => this.getSelectedResources(), this.menus, updateWidth);
 		const resourceTreeRenderer = this.instantiationService.createInstance(ResourceTreeRenderer, this.listLabels, actionViewItemProvider, () => this.getSelectedResources(), this.themeService, this.menus);
+		const resourceGroupTreeRenderer = this.instantiationService.createInstance(ResourceGroupTreeRenderer, actionViewItemProvider, this.themeService, this.menus);
 
-		this.tree = this.instantiationService.createInstance(WorkbenchAsyncDataTree, this.changesContainer, new SCMDelagate(), [filesRenderer, resourceTreeRenderer],
+		this.tree = this.instantiationService.createInstance(WorkbenchAsyncDataTree, this.changesContainer, new SCMDelagate(), [filesRenderer, resourceTreeRenderer, resourceGroupTreeRenderer],
 			this.instantiationService.createInstance(SCMDataSource), {
 				identityProvider: {
-					getId: (stat: SCMExplorerItem | ISCMResource) => {
+					getId: (stat: SCMExplorerItem | ISCMResource | ISCMResourceGroup) => {
 						if (stat instanceof SCMExplorerItem) {
-							return stat.resource;
+							return stat.resource + ' - ' + stat.resourceGroup!.id;
+						} else if (isSCMResource(stat)) {
+							return stat.sourceUri + ' - ' + stat.resourceGroup!.id;
 						} else {
-							return stat.sourceUri;
+							return stat.id;
 						}
 					}
 				},
 				sorter: this.instantiationService.createInstance(SCMSorter),
 				autoExpandSingleChildren: true
-			}) as WorkbenchAsyncDataTree<SCMExplorerItem | ISCMResource, SCMExplorerItem | ISCMResource>;
+			}) as WorkbenchAsyncDataTree<SCMExplorerItem | ISCMResource | ISCMResourceGroup, SCMExplorerItem | ISCMResource | ISCMResourceGroup>;
 
 
 		this.buildTree();
@@ -1203,22 +1269,24 @@ export class RepositoryPanel extends ViewletPanel {
 		let root: SCMExplorerItem | undefined;
 
 		this.repository.provider.groups.elements.forEach(group => {
+			let rootFound = false;
+
 			group.elements.forEach(resource => {
 				let currentItem: SCMExplorerItem | ISCMResource = resource;
 
 				// Build up to the closest parent in the tree already
-				if (root) {
+				if (rootFound) {
 					let treeFound = false;
 					while (!treeFound) {
 						const parentUri: URI = currentItem instanceof SCMExplorerItem ? this.getParentUri(currentItem.resource) : this.getParentUri(currentItem.sourceUri);
-						const parentItem = root.hasChild(parentUri);
-						if (parentItem) {
+						const parentItem = root!.hasChild(parentUri, group);
+						if (parentItem && parentItem.resourceGroup === group) {
 							// Parent is in the tree already
 							parentItem.addSCMChild(currentItem);
 							treeFound = true;
 						} else {
 							// Parent is not in the tree
-							const parent = new SCMExplorerItem(parentUri);
+							const parent = new SCMExplorerItem(parentUri, group);
 							parent.addSCMChild(currentItem);
 							currentItem = parent;
 						}
@@ -1226,9 +1294,9 @@ export class RepositoryPanel extends ViewletPanel {
 				}
 
 				// Build up to the root for the first time
-				while (!root) {
+				while (!rootFound) {
 					const parentUri: URI = currentItem instanceof SCMExplorerItem ? this.getParentUri(currentItem.resource) : this.getParentUri(currentItem.sourceUri);
-					const parent = new SCMExplorerItem(parentUri);
+					const parent = new SCMExplorerItem(parentUri, group);
 
 					parent.addSCMChild(currentItem);
 					currentItem = parent;
@@ -1237,17 +1305,29 @@ export class RepositoryPanel extends ViewletPanel {
 						// Found the root
 						const workspaceParentUri = this.getParentUri(currentItem.resource);
 						const workspaceParent = new SCMExplorerItem(workspaceParentUri);
-						workspaceParent.addSCMChild(parent);
-						root = workspaceParent;
+
+						// Use the same root if we found it before
+						if (root) {
+							root.addSCMChild(group);
+							root.addSCMChild(parent);
+						} else {
+							workspaceParent.addSCMChild(group);
+							workspaceParent.addSCMChild(parent);
+							root = workspaceParent;
+						}
+
+						rootFound = true;
 					}
 				}
 			});
 		});
 
 		if (root) {
-			if (root.scmChildren[0] instanceof SCMExplorerItem) {
-				this.flattenTree(<SCMExplorerItem>root.scmChildren[0]);
-			}
+			root.scmChildren.forEach(child => {
+				if (child instanceof SCMExplorerItem) {
+					this.flattenTree(<SCMExplorerItem>child);
+				}
+			});
 
 			this.tree.setInput(root).then(() => {
 				this.tree.expandAll();
@@ -1262,8 +1342,13 @@ export class RepositoryPanel extends ViewletPanel {
 			root.scmChildren = childItem.scmChildren;
 
 			this.flattenTree(root);
-		} else if (root.scmChildren.length > 1 && root.scmChildren[0] instanceof SCMExplorerItem) {
-			root.scmChildren.forEach(child => this.flattenTree(<SCMExplorerItem>child));
+		} else if (root.scmChildren.length > 1) {
+			// Flatten all children that are folders
+			root.scmChildren.forEach(child => {
+				if (child instanceof SCMExplorerItem) {
+					this.flattenTree(<SCMExplorerItem>child);
+				}
+			});
 		}
 	}
 
@@ -1371,7 +1456,7 @@ export class RepositoryPanel extends ViewletPanel {
 		});
 	}
 
-	private onTreeContextMenu(e: ITreeContextMenuEvent<SCMExplorerItem | ISCMResource>): void {
+	private onTreeContextMenu(e: ITreeContextMenuEvent<SCMExplorerItem | ISCMResource | ISCMResourceGroup>): void {
 		if (!e.element) {
 			return;
 		}
@@ -1381,8 +1466,10 @@ export class RepositoryPanel extends ViewletPanel {
 
 		if (element instanceof SCMExplorerItem) {
 			actions = this.menus.getExplorerItemContextActions(element);
-		} else {
+		} else if (isSCMResource(element)) {
 			actions = this.menus.getResourceContextActions(element);
+		} else {
+			actions = this.menus.getResourceGroupContextActions(element);
 		}
 
 		this.contextMenuService.showContextMenu({

@@ -36,24 +36,25 @@ export interface ISCMResourceDecorations {
 }
 
 export class SCMExplorerItem extends ExplorerItem {
-	public scmChildren: (SCMExplorerItem | ISCMResource)[] = [];
-	constructor(public resource: URI) {
+	public scmChildren: (SCMExplorerItem | ISCMResource | ISCMResourceGroup)[] = [];
+
+	constructor(public resource: URI, public resourceGroup: ISCMResourceGroup | undefined = undefined) {
 		super(resource, undefined, true, false, false);
 	}
 
-	public addSCMChild(newChild: SCMExplorerItem | ISCMResource) {
+	public addSCMChild(newChild: SCMExplorerItem | ISCMResource | ISCMResourceGroup) {
 		this.scmChildren.push(newChild);
 	}
 
-	public hasChild(childUri: URI): SCMExplorerItem | undefined {
-		if (this.resource.fsPath === childUri.fsPath) {
+	public hasChild(childUri: URI, childResourceGroup: ISCMResourceGroup): SCMExplorerItem | undefined {
+		if (this.resource.fsPath === childUri.fsPath && this.resourceGroup === childResourceGroup) {
 			return this;
 		}
 
 		for (const child of this.scmChildren) {
 			if (child instanceof SCMExplorerItem) {
-				if (child.hasChild(childUri)) {
-					return child.hasChild(childUri);
+				if (child.hasChild(childUri, childResourceGroup)) {
+					return child.hasChild(childUri, childResourceGroup);
 				}
 			}
 		}

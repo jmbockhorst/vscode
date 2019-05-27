@@ -872,12 +872,20 @@ export class CommandCenter {
 
 	@command('git.stageDirectory', { repository: true })
 	async stageDirectory(repository: Repository, directory: any): Promise<void> {
-		await repository.add([directory.resource]);
+		const resources = repository.workingTreeGroup.resourceStates.filter(r => r.resourceUri.fsPath.startsWith(directory.resource.fsPath));
+		await this.stage(...resources);
 	}
 
 	@command('git.unstageDirectory', { repository: true })
 	async unstageDirectory(repository: Repository, directory: any): Promise<void> {
-		await repository.revert([directory.resource]);
+		const resources = repository.indexGroup.resourceStates.filter(r => r.resourceUri.fsPath.startsWith(directory.resource.fsPath));
+		await this.unstage(...resources);
+	}
+
+	@command('git.cleanDirectory', { repository: true })
+	async cleanDirectory(repository: Repository, directory: any): Promise<void> {
+		const resources = repository.workingTreeGroup.resourceStates.filter(r => r.resourceUri.fsPath.startsWith(directory.resource.fsPath));
+		await this.clean(...resources);
 	}
 
 	private async _stageDeletionConflict(repository: Repository, uri: Uri): Promise<void> {

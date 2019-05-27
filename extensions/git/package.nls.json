@@ -20,6 +20,7 @@
 	"command.unstageAll": "Unstage All Changes",
 	"command.unstageSelectedRanges": "Unstage Selected Ranges",
 	"command.unstageDirectory": "Unstage Directory",
+	"command.cleanDirectory": "Discard Directory Changes",
 	"command.clean": "Discard Changes",
 	"command.cleanAll": "Discard All Changes",
 	"command.commit": "Commit",

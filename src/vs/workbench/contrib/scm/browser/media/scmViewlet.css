@@ -113,31 +113,33 @@
 	flex-grow: 100;
 }
 
-.scm-viewlet .monaco-list .monaco-list-row > .resource-group > .actions,
+.scm-viewlet .monaco-list .monaco-list-row .resource-group > .actions,
 .scm-viewlet .monaco-list .monaco-list-row .resource > .name > .monaco-icon-label > .actions,
 .scm-viewlet .monaco-list .monaco-list-row .tree-resource-group > .monaco-icon-label > .actions {
 	display: none;
 }
 
-.scm-viewlet .monaco-list .monaco-list-row:hover > .resource-group > .actions,
+.scm-viewlet .monaco-list .monaco-list-row:hover .resource-group > .actions,
 .scm-viewlet .monaco-list .monaco-list-row:hover .resource > .name > .monaco-icon-label > .actions,
 .scm-viewlet .monaco-list .monaco-list-row:hover .tree-resource-group > .monaco-icon-label > .actions,
-.scm-viewlet .monaco-list .monaco-list-row.selected > .resource-group > .actions,
-.scm-viewlet .monaco-list .monaco-list-row.focused > .resource-group > .actions,
+.scm-viewlet .monaco-list .monaco-list-row.selected .resource-group > .actions,
+.scm-viewlet .monaco-list .monaco-list-row.focused .resource-group > .actions,
 .scm-viewlet .monaco-list .monaco-list-row.selected .resource > .name > .monaco-icon-label > .actions,
 .scm-viewlet .monaco-list .monaco-list-row.focused .resource > .name > .monaco-icon-label > .actions,
+.scm-viewlet .monaco-list .monaco-list-row.selected .tree-resource-group > .monaco-icon-label > .actions,
+.scm-viewlet .monaco-list .monaco-list-row.focused .tree-resource-group > .monaco-icon-label > .actions,
 .scm-viewlet .monaco-list:not(.selection-multiple) .monaco-list-row .resource:hover > .actions {
 	display: block;
 }
 
-.scm-viewlet .scm-status.show-actions > .monaco-list .monaco-list-row > .resource-group > .actions,
+.scm-viewlet .scm-status.show-actions > .monaco-list .monaco-list-row .resource-group > .actions,
 .scm-viewlet .scm-status.show-actions > .monaco-list .monaco-list-row .resource > .name > .monaco-icon-label > .actions,
 .scm-viewlet .scm-status.show-actions > .monaco-list .monaco-list-row .tree-resource-group > .monaco-icon-label > .actions {
 	display: block;
 }
 
 .scm-viewlet .monaco-list-row .resource > .name > .monaco-icon-label > .actions .action-label,
-.scm-viewlet .monaco-list-row > .resource-group > .actions .action-label,
+.scm-viewlet .monaco-list-row .resource-group > .actions .action-label,
 .scm-viewlet .monaco-list-row .tree-resource-group > .monaco-icon-label > .actions .action-label {
 	width: 16px;
 	height: 100%;
